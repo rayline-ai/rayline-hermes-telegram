@@ -51,8 +51,8 @@ No OpenAI/Anthropic keys are required — Rayline provides model execution.
 ### 1. Clone and configure credentials
 
 ```bash
-git clone <this-repo> rayline-hermes-demo
-cd rayline-hermes-demo
+git clone <this-repo> rayline-hermes-telegram
+cd rayline-hermes-telegram
 cp .env.sample .env
 ```
 
@@ -76,7 +76,7 @@ From the repo folder (this mounts the folder — and `.env` — into the sandbox
 same path as on the host):
 
 ```bash
-sbx create --name rayline-hermes-demo shell .
+sbx create --name rayline-hermes-telegram shell .
 ```
 
 ### 3. One-time install inside the sandbox
@@ -86,8 +86,12 @@ starts in the mounted repo, so run it with a relative path — and **interactive
 (so the long installs aren't torn down mid-run):
 
 ```bash
-sbx exec -it rayline-hermes-demo bash scripts/sandbox-setup.sh
+sbx exec -it rayline-hermes-telegram bash scripts/sandbox-setup.sh
 ```
+
+Safe to re-run: it skips what is already there, and upgrades `rld` if the sandbox has an
+older one than the pinned `RAYLINE_VERSION`. Set `RAYLINE_VERSION=latest` to track the
+channel instead of the pin.
 
 ### 4. Start it and chat
 
@@ -95,7 +99,7 @@ From the host:
 
 ```bash
 ./run.sh        # macOS / Linux
-.\run.ps1       # Windows (PowerShell)
+.\run.ps1       # Windows (PowerShell 7 — `pwsh`, not Windows PowerShell 5.1)
 ```
 
 This starts the sandbox, the Rayline router, and the Hermes gateway. Then open Telegram,
@@ -104,7 +108,7 @@ find **your bot**, tap **Start**, and send a message — the reply is generated 
 To stop:
 
 ```bash
-sbx stop rayline-hermes-demo
+sbx stop rayline-hermes-telegram
 ```
 
 ---
@@ -125,7 +129,7 @@ also flips `platforms.telegram.enabled: true` in Hermes' config). The gateway co
 **Verify** it connected:
 
 ```bash
-sbx exec rayline-hermes-demo bash -c "grep -i 'telegram connected' ~/.hermes/logs/agent.log | tail -1"
+sbx exec rayline-hermes-telegram bash -c "grep -i 'telegram connected' ~/.hermes/logs/agent.log | tail -1"
 # INFO gateway.run: ✓ telegram connected
 ```
 
@@ -200,8 +204,8 @@ networking involved.
 
 **Bot doesn't reply.** Check the router is up and Telegram connected:
 ```bash
-sbx exec rayline-hermes-demo bash -c "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:20809/version"   # any code = up; 000 = down
-sbx exec rayline-hermes-demo bash -c "tail -20 ~/.hermes/logs/agent.log"
+sbx exec rayline-hermes-telegram bash -c "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:20809/version"   # any code = up; 000 = down
+sbx exec rayline-hermes-telegram bash -c "tail -20 ~/.hermes/logs/agent.log"
 ```
 
 **Router log shows `status=401 routed=cloud`.** The `rlk-` key is missing/invalid — check
@@ -209,7 +213,7 @@ sbx exec rayline-hermes-demo bash -c "tail -20 ~/.hermes/logs/agent.log"
 
 **Watch a request flow end-to-end:**
 ```bash
-sbx exec rayline-hermes-demo bash -c "tail -f logs/rld.log"
+sbx exec rayline-hermes-telegram bash -c "tail -f logs/rld.log"
 # local route endpoint:rayline-cloud requested=rayline-router ... → POST /v1/messages status=200 routed=cloud
 ```
 

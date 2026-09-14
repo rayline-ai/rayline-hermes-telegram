@@ -3,20 +3,22 @@
 # wire the mounted .env into the shell, and point Hermes at the router.
 #
 # Run it interactively from the repo (so the long installs aren't torn down):
-#   sbx exec -it rayline-hermes-demo bash scripts/sandbox-setup.sh
+#   sbx exec -it rayline-hermes-telegram bash scripts/sandbox-setup.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
-RAYLINE_VERSION="${RAYLINE_VERSION:-v0.2.0-rc.1}"
+# Pinned, not `latest`, so a demo someone runs next month installs what was tested.
+# Set RAYLINE_VERSION=latest to track the channel instead.
+RAYLINE_VERSION="${RAYLINE_VERSION:-0.2.6+7bd2849c99d2}"
 
 echo "==> Repo (mounted in sandbox): $REPO"
 
 # 1. Auto-load the mounted .env + tool paths in ~/.bashrc (idempotent).
-if ! grep -q "rayline-hermes-demo env autoload" ~/.bashrc 2>/dev/null; then
+if ! grep -q "rayline-hermes-telegram env autoload" ~/.bashrc 2>/dev/null; then
   cat >> ~/.bashrc <<EOF
 
-# rayline-hermes-demo env autoload
+# rayline-hermes-telegram env autoload
 set -a
 [ -f "$REPO/.env" ] && source "$REPO/.env"
 set +a
@@ -42,11 +44,29 @@ if ! command -v hermes >/dev/null 2>&1; then
 fi
 hermes config migrate 2>/dev/null || true
 
-# 4. Install the Rayline rld daemon if missing (public release is a pre-release, so pin it).
-if [ ! -x "$HOME/.rayline/bin/rld" ]; then
-  echo "==> Installing Rayline ($RAYLINE_VERSION)..."
-  curl -fsSL https://raw.githubusercontent.com/rayline-ai/rayline/main/scripts/install-rayline.sh -o /tmp/install-rayline.sh
-  sh /tmp/install-rayline.sh --version "$RAYLINE_VERSION"
+# 4. Install (or upgrade) the Rayline rld daemon.
+#
+# get.rayline.ai is the official channel. The rayline-ai/rayline GitHub releases page is a
+# stale mirror — its newest tag is still v0.2.0-rc.1, which predates `rld serve
+# --no-local-model`, the flag rayline/start-router.sh now relies on.
+#
+# Version-compare rather than test for the binary: a sandbox set up before this change has a
+# working older `rld` at that path, and "already installed" would leave it there forever.
+if [ "$RAYLINE_VERSION" = "latest" ]; then
+  RAYLINE_VERSION="$(curl -fsSL https://get.rayline.ai/cli/latest.txt | tr -d '[:space:]')"
+  echo "==> Latest Rayline is $RAYLINE_VERSION"
+fi
+INSTALLED_RAYLINE=""
+[ -x "$HOME/.rayline/bin/rld" ] && INSTALLED_RAYLINE="$("$HOME/.rayline/bin/rld" --version 2>/dev/null | awk '{print $2}')"
+if [ "$INSTALLED_RAYLINE" != "$RAYLINE_VERSION" ]; then
+  echo "==> Installing Rayline $RAYLINE_VERSION${INSTALLED_RAYLINE:+ (replacing $INSTALLED_RAYLINE)}..."
+  curl -fsSL https://get.rayline.ai/install.sh -o /tmp/install-rayline.sh
+  # bash, not sh: this installer is a bash script (the GitHub one was POSIX sh).
+  # NO_PATH_UPDATE because step 1 already puts ~/.rayline/bin on PATH in ~/.bashrc, and the
+  # installer would append a second, redundant export.
+  RAYLINE_NO_PATH_UPDATE=1 bash /tmp/install-rayline.sh "$RAYLINE_VERSION"
+else
+  echo "==> Rayline $RAYLINE_VERSION already installed"
 fi
 
 # 5. Point Hermes at the Rayline injector + enable Telegram (patch Hermes' own config).
