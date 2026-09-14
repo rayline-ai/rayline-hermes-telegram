@@ -29,10 +29,49 @@ fi
 set -a; [ -f "$REPO/.env" ] && source "$REPO/.env"; set +a
 export PATH="$HOME/.local/bin:$HOME/.rayline/bin:$PATH"
 
-# 2. System deps for the Hermes installer (usually preinstalled in the sbx shell template).
+# 2. System deps.
+#
+# A freshly created sandbox is still running the shell template's own apt work when this script
+# first runs, so plain apt calls lose a race: "Could not get lock /var/lib/apt/lists/lock. It is
+# held by process N (apt-get)". DPkg::Lock::Timeout alone does not fix this — it governs the
+# dpkg lock, not the lists lock that `apt-get update` takes — so the wait has to be explicit.
+apt_retry() {
+  local tries=60 n=1
+  until sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 "$@"; do
+    if [ "$n" -ge "$tries" ]; then
+      echo "ERROR: 'apt-get $*' still blocked after $((tries * 5))s — another process holds the apt lock" >&2
+      return 1
+    fi
+    echo "    apt is locked (sandbox still provisioning) — retrying $n/$tries..."
+    n=$((n + 1))
+    sleep 5
+  done
+}
+
+# Best-effort refresh: if the template holds the lists lock, it is because it is mid-update, so
+# the lists it leaves behind are fresh enough to install from. Not worth failing setup over.
+apt_update_soft() {
+  sudo apt-get -o DPkg::Lock::Timeout=60 update -qq \
+    || echo "    (apt lists busy — installing from the lists already present)"
+}
+
 if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
   echo "==> Installing system deps (git, curl)..."
-  sudo apt-get update -qq && sudo apt-get install -y -qq git curl
+  apt_update_soft
+  apt_retry install -y -qq git curl
+fi
+
+# 2b. C++ toolchain, BEFORE the Hermes installer runs.
+#
+# Hermes compiles native Node modules (node-pty). With no compiler present its installer warns,
+# tries `apt install build-essential` itself, and if that fails stops at an interactive prompt —
+# which, run without a TTY (plain `sbx exec`, CI), reads EOF and makes the installer **exit 0
+# having installed nothing**. A zero exit code and no `hermes` on PATH is a confusing place to
+# start debugging, so install the compiler here and never reach that branch.
+if ! command -v c++ >/dev/null 2>&1; then
+  echo "==> Installing build-essential (Hermes builds node-pty from source)..."
+  apt_update_soft
+  apt_retry install -y -qq build-essential
 fi
 
 # 3. Install Hermes (Nous Research) if missing.

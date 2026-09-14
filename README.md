@@ -64,36 +64,15 @@ TELEGRAM_BOT_TOKEN=123456:AA...     # from @BotFather
 GATEWAY_ALLOW_ALL_USERS=true        # demo: bot replies to anyone who messages it
 ```
 
-### 2. Create the sandbox
+### 2. Sign in to sbx
 
-> First-time only: sign in and set a network policy for sandboxes.
-> ```bash
-> sbx login                 # Docker sign-in (once per machine)
-> sbx policy init allow-all # allow sandbox outbound egress (installs, Telegram, Rayline)
-> ```
-
-From the repo folder (this mounts the folder — and `.env` — into the sandbox at the
-same path as on the host):
+Once per machine:
 
 ```bash
-sbx create --name rayline-hermes-telegram shell .
+sbx login                 # Docker sign-in
 ```
 
-### 3. One-time install inside the sandbox
-
-Installs Hermes + the Rayline `rld` router and points Hermes at the router. `sbx exec`
-starts in the mounted repo, so run it with a relative path — and **interactively**
-(so the long installs aren't torn down mid-run):
-
-```bash
-sbx exec -it rayline-hermes-telegram bash scripts/sandbox-setup.sh
-```
-
-Safe to re-run: it skips what is already there, and upgrades `rld` if the sandbox has an
-older one than the pinned `RAYLINE_VERSION`. Set `RAYLINE_VERSION=latest` to track the
-channel instead of the pin.
-
-### 4. Start it and chat
+### 3. Start it and chat
 
 From the host:
 
@@ -102,8 +81,28 @@ From the host:
 .\run.ps1       # Windows (PowerShell 7 — `pwsh`, not Windows PowerShell 5.1)
 ```
 
-This starts the sandbox, the Rayline router, and the Hermes gateway. Then open Telegram,
-find **your bot**, tap **Start**, and send a message — the reply is generated through Rayline.
+**On the first run this does the whole setup for you**: creates the sandbox (mounting this
+folder — and `.env` — at the same path inside it), then installs Hermes and the Rayline `rld`
+router and points Hermes at the router. Expect several minutes and a lot of installer output;
+every later run skips straight to starting things and takes seconds.
+
+Then open Telegram, find **your bot**, tap **Start**, and send a message — the reply is
+generated through Rayline.
+
+The install step is `scripts/sandbox-setup.sh`, and it is safe to re-run on its own: it skips
+what is already there, and upgrades `rld` if the sandbox has an older one than the pinned
+`RAYLINE_VERSION`. Set `RAYLINE_VERSION=latest` to track the channel instead of the pin.
+
+```bash
+sbx exec -it rayline-hermes-telegram bash scripts/sandbox-setup.sh
+```
+
+The run script leaves one **`sbx exec` process running on the host** (hidden on Windows,
+`nohup`-ed on macOS/Linux) with the gateway in its foreground. That is deliberate: sbx
+auto-stops a sandbox 30 seconds after its *last session disconnects*, so a gateway
+backgrounded inside the sandbox would connect to Telegram, report success, and then go
+silent half a minute later when the sandbox stopped under it. Keeping the gateway in a
+foreground session means the sandbox lives exactly as long as the bot does.
 
 To stop:
 
@@ -195,6 +194,7 @@ networking involved.
 | `scripts/sandbox-setup.sh` | One-time in-sandbox install of Hermes + `rld` and config wiring. |
 | `rayline/router.json` | Rayline routing config (RRL mode); set `routes.main.model` here. |
 | `rayline/start-router.sh` | Launches the `rld` router inside the sandbox (idempotent). |
+| `scripts/start-gateway.sh` | Runs the Hermes gateway in the sandbox foreground, so the host `sbx exec` session holds the sandbox open (see below). |
 | `run.sh` | Daily start (macOS / Linux): sandbox → Rayline router → Hermes gateway. |
 | `run.ps1` | Daily start (Windows): sandbox → Rayline router → Hermes gateway. |
 
