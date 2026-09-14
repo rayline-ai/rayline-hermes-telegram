@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# rayline-hermes-telegram — daily start script (macOS / Linux).
-# Brings up the sbx sandbox, the Rayline router, and the Hermes gateway (Telegram).
-# Assumes one-time setup is done (see README.md).
+# rayline-hermes-telegram — start script (macOS / Linux).
+# Brings up the sbx sandbox, the Rayline router, and the Hermes gateway (Telegram). On a fresh
+# checkout it also creates the sandbox and runs the one-time install, so this is the only
+# command needed after filling in .env.
 #
 # POSIX counterpart to run.ps1. `sbx exec` runs in the mounted repo, so all in-sandbox
 # paths below are relative. On macOS/Linux sbx manages its own runtime (its own sandboxd),
@@ -24,6 +25,16 @@ say() { printf '%s%s%s\n' "$2" "$1" "$Reset"; }
 
 say "=== rayline-hermes-telegram startup ===" "$Cyan"
 
+# 0. Credentials. .env is git-ignored, so it is always absent on a fresh checkout — catch that
+# here rather than 300 lines later as "RAYLINE_ROUTER_API_KEY is not set" from the router.
+if [ ! -f .env ]; then
+  say "ERROR: .env not found. Create it and fill in your two secrets:" "$Red"
+  say "         cp .env.sample .env" "$White"
+  say "       RAYLINE_ROUTER_API_KEY  from platform.rayline.ai/keys" "$White"
+  say "       TELEGRAM_BOT_TOKEN      from @BotFather on Telegram" "$White"
+  exit 1
+fi
+
 # 1. sbx present + authenticated
 say "Checking Docker Sandboxes (sbx)..." "$Yellow"
 if ! command -v sbx >/dev/null 2>&1; then
@@ -36,13 +47,32 @@ if ! sbx ls >/dev/null 2>&1; then
 fi
 say "  sbx is ready." "$Green"
 
-# 2. Sandbox (must already exist — see README one-time setup)
+# 2. Sandbox — created and provisioned on first run.
+sbx policy init allow-all >/dev/null 2>&1 || true   # no-op if already initialized
+
 if ! sbx ls 2>&1 | grep -q "$Sandbox"; then
-  say "ERROR: Sandbox '$Sandbox' not found. Run the one-time setup in README.md first." "$Red"
-  exit 1
+  say "First run: creating sandbox '$Sandbox'..." "$Yellow"
+  # Mounts this folder into the sandbox at the same path as on the host.
+  if ! sbx create --name "$Sandbox" shell "$PWD"; then
+    say "ERROR: 'sbx create' failed." "$Red"
+    exit 1
+  fi
+
+  say "Installing Hermes + Rayline in the sandbox (several minutes, one time only)..." "$Yellow"
+  if ! sbx exec "$Sandbox" bash scripts/sandbox-setup.sh; then
+    say "ERROR: in-sandbox setup failed — see the output above." "$Red"
+    say "       It is safe to re-run this script; setup skips what is already installed." "$White"
+    exit 1
+  fi
+  # The installer puts `hermes` on PATH via ~/.bashrc; if it is missing, the install exited
+  # early (this is what a torn-down or prompt-blocked installer looks like) and the gateway
+  # would fail later with a far less obvious error.
+  if ! sbx exec "$Sandbox" bash -c "source ~/.bashrc; command -v hermes >/dev/null" 2>/dev/null; then
+    say "ERROR: setup finished but 'hermes' is not installed. Re-run this script." "$Red"
+    exit 1
+  fi
 fi
 say "Starting sandbox..." "$Yellow"
-sbx policy init allow-all >/dev/null 2>&1 || true   # no-op if already initialized
 sbx exec "$Sandbox" bash -c "echo ready" >/dev/null 2>&1 || true   # 'exec' auto-starts a stopped sandbox
 
 # 3. Rayline router (RRL)
@@ -65,16 +95,20 @@ else
   say "WARNING: router not responding on :20809 — check logs/rld.log" "$Yellow"
 fi
 
-# 4. Hermes gateway (Telegram), detached (see the note on step 3 for why not `sbx exec -d`)
-# Idempotent like start-router.sh: a second gateway would poll Telegram concurrently and both
-# pollers then trade 409 Conflict. The [h] bracket keeps the pgrep from matching its own
-# command line (which contains the literal "[h]ermes gateway", not "hermes gateway").
+# 4. Hermes gateway (Telegram) — a host-side session holder, NOT a detached in-sandbox process.
+#
+# sbx auto-stops a sandbox 30s after its last session disconnects, so the gateway cannot be
+# backgrounded inside the sandbox the way the router is: it would be killed moments after this
+# script exits. It runs in the foreground of its own `sbx exec` instead, and that host process
+# — detached here with nohup, so it outlives this script — is what keeps the sandbox (and with
+# it the router) up. See scripts/start-gateway.sh. `sbx stop` still stops everything.
 if sbx exec "$Sandbox" bash -c "pgrep -f '[h]ermes gateway' >/dev/null" 2>/dev/null; then
   say "  Hermes gateway already running." "$Green"
 else
   say "Starting Hermes gateway..." "$Yellow"
-  sbx exec "$Sandbox" bash -c "source ~/.bashrc; nohup hermes gateway > logs/gateway.log 2>&1 </dev/null & disown"
-  sleep 12
+  nohup sbx exec "$Sandbox" bash scripts/start-gateway.sh \
+    > logs/gateway-holder.log 2>&1 < /dev/null &
+  sleep 15
 fi
 connected="$(sbx exec "$Sandbox" bash -c "grep -i 'telegram connected' ~/.hermes/logs/agent.log 2>/dev/null | tail -1" 2>/dev/null || true)"
 
