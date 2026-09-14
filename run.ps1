@@ -1,4 +1,4 @@
-# rayline-hermes-demo — daily start script.
+# rayline-hermes-telegram — daily start script.
 # Brings up Docker (if needed), then the sbx sandbox, the Rayline router, and the Hermes
 # gateway (Telegram). Assumes one-time setup is done (see README.md).
 #
@@ -6,9 +6,9 @@
 
 $ErrorActionPreference = "Stop"
 
-$Sandbox = "rayline-hermes-demo"
+$Sandbox = "rayline-hermes-telegram"
 
-Write-Host "=== rayline-hermes-demo startup ===" -ForegroundColor Cyan
+Write-Host "=== rayline-hermes-telegram startup ===" -ForegroundColor Cyan
 
 # 1. Docker engine (sbx runs sandboxes on it)
 Write-Host "Checking Docker..." -ForegroundColor Yellow
@@ -27,7 +27,13 @@ if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Docker is not responding." -Foregr
 Write-Host "  Docker is running." -ForegroundColor Green
 
 # 2. Sandbox (must already exist — see README one-time setup)
+# `sbx ls` is also the auth probe: unauthenticated, it fails instead of listing, and a bare
+# -notmatch would report that as "sandbox not found" — the wrong fix to go chase.
 $sandboxList = (sbx ls 2>&1) -join "`n"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: sbx is not authenticated (or its daemon can't start). Run 'sbx login' first." -ForegroundColor Red
+    exit 1
+}
 if ($sandboxList -notmatch $Sandbox) {
     Write-Host "ERROR: Sandbox '$Sandbox' not found. Run the one-time setup in README.md first." -ForegroundColor Red
     exit 1
@@ -37,8 +43,13 @@ sbx policy init allow-all *> $null            # no-op if already initialized
 sbx exec $Sandbox bash -c "echo ready" *> $null
 
 # 3. Rayline router (RRL)
+#
+# Not `sbx exec -d`: despite the help text ("run command in the background"), sbx v0.34 does
+# not return from a detached exec — it blocks for the life of the command, so the script would
+# hang here and never reach the gateway. Background it *inside* the sandbox instead, with all
+# three stdio streams detached from the exec so nothing holds the pipe open.
 Write-Host "Starting Rayline router (RRL)..." -ForegroundColor Yellow
-sbx exec -d $Sandbox bash -c "source ~/.bashrc && bash rayline/start-router.sh"
+sbx exec $Sandbox bash -c "source ~/.bashrc; nohup bash rayline/start-router.sh >> logs/rld.log 2>&1 </dev/null & disown"
 $routerReady = $false
 for ($i = 0; $i -lt 15; $i++) {
     Start-Sleep -Seconds 2
@@ -48,10 +59,18 @@ for ($i = 0; $i -lt 15; $i++) {
 if ($routerReady) { Write-Host "  Rayline router listening on :20809." -ForegroundColor Green }
 else { Write-Host "WARNING: router not responding on :20809 — check logs/rld.log" -ForegroundColor Yellow }
 
-# 4. Hermes gateway (Telegram), detached
-Write-Host "Starting Hermes gateway..." -ForegroundColor Yellow
-sbx exec -d $Sandbox bash -c "source ~/.bashrc && hermes gateway > logs/gateway.log 2>&1"
-Start-Sleep -Seconds 12
+# 4. Hermes gateway (Telegram), detached (see the note on step 3 for why not `sbx exec -d`)
+# Idempotent like start-router.sh: a second gateway would poll Telegram concurrently and both
+# pollers then trade 409 Conflict. The [h] bracket keeps the pgrep from matching its own
+# command line (which contains the literal "[h]ermes gateway", not "hermes gateway").
+$gwUp = (sbx exec $Sandbox bash -c "pgrep -f '[h]ermes gateway' >/dev/null && echo up || echo down") -join ""
+if ($gwUp -match "up") {
+    Write-Host "  Hermes gateway already running." -ForegroundColor Green
+} else {
+    Write-Host "Starting Hermes gateway..." -ForegroundColor Yellow
+    sbx exec $Sandbox bash -c "source ~/.bashrc; nohup hermes gateway > logs/gateway.log 2>&1 </dev/null & disown"
+    Start-Sleep -Seconds 12
+}
 $connected = sbx exec $Sandbox bash -c "grep -i 'telegram connected' ~/.hermes/logs/agent.log 2>/dev/null | tail -1" 2>$null
 
 Write-Host ""
