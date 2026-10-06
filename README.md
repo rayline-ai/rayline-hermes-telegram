@@ -140,15 +140,18 @@ more — the same "dials outbound" model applies. Telegram is just the lowest-fr
 ## Choosing the model
 
 The model is controlled by **`rayline/router.json`** → `routes.main.model`. This demo ships
-with the virtual router model so the Rayline cloud picks per your account settings:
+with `arc-1`, Rayline's ARC router, which picks the concrete model for every turn:
 
 ```jsonc
 "main": {
   "endpoint": "rayline-cloud",
-  "model": "rayline-router",     // ← the Rayline cloud decides the concrete model
-  "router": "rayline-local"      //   (per your Main Chat Model settings on the platform)
+  "model": "arc-1",              // ← ARC decides the concrete model
+  "router": "rayline-local"
 }
 ```
+
+**To follow your platform settings instead**, set it to `rayline-router`: the Rayline cloud
+then picks per your Main Chat Model settings on the platform.
 
 **To pin a specific model** — e.g. GLM — set it to a real catalog id:
 
