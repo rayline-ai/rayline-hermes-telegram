@@ -140,30 +140,37 @@ more — the same "dials outbound" model applies. Telegram is just the lowest-fr
 ## Choosing the model
 
 The model is controlled by **`rayline/router.json`** → `routes.main.model`. This demo ships
-with the virtual router model so the Rayline cloud picks per your account settings:
+with **ARC Sage**, so Rayline's ARC picks the concrete model and reasoning effort per request:
 
 ```jsonc
 "main": {
   "endpoint": "rayline-cloud",
-  "model": "rayline-router",     // ← the Rayline cloud decides the concrete model
-  "router": "rayline-local"      //   (per your Main Chat Model settings on the platform)
+  "model": "arc-sage-1.0",       // ← ARC decides the concrete model + effort
+  "router": "rayline-local"      //   RRL: the on-device router pins this route's model
 }
 ```
 
-**To pin a specific model** — e.g. GLM — set it to a real catalog id:
+The route's `model` is sent to the Rayline cloud exactly as written, so it decides what runs:
 
-```jsonc
-"model": "z-ai/glm-5.2",         // ← every request served by GLM 5.2
-```
+| `model` | What happens |
+|---|---|
+| `arc-sage-1.0` *(default)* | ARC routes — tuned for harder agent tasks, fixed Sage rate card |
+| `arc-swift-1.0` | ARC routes — faster and cheaper, fixed Swift rate card |
+| a concrete id, e.g. `glm-5.3`, `claude-sonnet-5-5` | **pinned** — that model serves every request, no routing |
+| `rayline-router` | **retired** — the cloud returns `404 model_not_found` |
 
-> Use the **model id**, not a display label: it's `z-ai/glm-5.2`, not `GLM-5.2`. List the
+> Use the **model id**, not a display label: it's `glm-5.3`, not `GLM-5.3`. List the
 > ids your account serves with:
 > ```bash
 > curl -s https://api.rayline.ai/v1/models -H "authorization: Bearer $RAYLINE_ROUTER_API_KEY"
 > ```
-> (e.g. `rayline-router`, `z-ai/glm-5.2`, `gpt-5.5`, …). Then restart the router — the
-> daemon reloads the config. Hermes' own model setting stays `rayline-router`; it's just a
-> passthrough label, so **change the served model in `router.json`, not in Hermes' config.**
+> Then restart the router (`sbx stop rayline-hermes-telegram`, then the run script again).
+> Hermes' own model setting is `rayline-auto` — the local router's virtual model, meaning
+> "apply `routes.main`" — so **change the served model in `router.json`, not in Hermes' config.**
+
+`arc-1.0` (ARC Dynamic) is deliberately not used: it needs `routing.v_value` in every request
+body, which Hermes has no way to send, so it fails with `400 value_required`. Sage and Swift
+are ARC at a fixed value and need nothing extra.
 
 ---
 
@@ -214,7 +221,8 @@ sbx exec rayline-hermes-telegram bash -c "tail -20 ~/.hermes/logs/agent.log"
 **Watch a request flow end-to-end:**
 ```bash
 sbx exec rayline-hermes-telegram bash -c "tail -f logs/rld.log"
-# local route endpoint:rayline-cloud requested=rayline-router ... → POST /v1/messages status=200 routed=cloud
+# local route endpoint:rayline-cloud requested=rayline-auto selected=arc-sage-1.0 policy=main ...
+# POST /v1/messages → http://127.0.0.1:20811 status=200 routed=cloud
 ```
 
 ---

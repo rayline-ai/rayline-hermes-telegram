@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Pinned, not `latest`, so a demo someone runs next month installs what was tested.
 # Set RAYLINE_VERSION=latest to track the channel instead.
-RAYLINE_VERSION="${RAYLINE_VERSION:-0.2.6+7bd2849c99d2}"
+RAYLINE_VERSION="${RAYLINE_VERSION:-0.4.2+cd11a0bdc1e2}"
 
 echo "==> Repo (mounted in sandbox): $REPO"
 
@@ -119,8 +119,14 @@ c = yaml.safe_load(open(p)) or {}
 # generic Anthropic-compatible endpoint. (Do NOT use provider 'anthropic': recent Hermes
 # only honors model.base_url there for *.anthropic.com / *.azure.com / */anthropic hosts,
 # so a loopback URL is silently dropped and traffic falls back to api.anthropic.com.)
-c['model'] = {'default': 'rayline-router', 'provider': 'custom',
-              'base_url': 'http://127.0.0.1:20809', 'api_mode': 'anthropic_messages'}
+#
+# 'rayline-auto' is the local router's virtual model ('rayline-router' before rld 0.4.1): it
+# means "apply routes.main from rayline/router.json", which is where the served model is set.
+# context_length is ARC's window; without it Hermes can't size an unknown model id and
+# guesses 256k, which is larger than what the routed model will accept.
+c['model'] = {'default': 'rayline-auto', 'provider': 'custom',
+              'base_url': 'http://127.0.0.1:20809', 'api_mode': 'anthropic_messages',
+              'context_length': 200000}
 # Enable the Telegram platform + its toolset.
 c.setdefault('platforms', {})['telegram'] = {'enabled': True, 'reply_to_mode': 'first'}
 c.setdefault('platform_toolsets', {}).setdefault('telegram', ['hermes-telegram'])
