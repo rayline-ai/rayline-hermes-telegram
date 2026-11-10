@@ -7,22 +7,22 @@
       "api_key_env": "RAYLINE_ROUTER_API_KEY",
       "auth": "api_key",
       "models": [
-        "arc-1",
-        "rayline-router",
-        "z-ai/glm-5.2",
-        "gpt-5.5"
+        "arc-sage-1.0",
+        "arc-swift-1.0",
+        "glm-5.3",
+        "claude-sonnet-5-5"
       ]
     }
   ],
   "routes": {
     "main": {
       "endpoint": "rayline-cloud",
-      "model": "arc-1",
+      "model": "arc-sage-1.0",
       "router": "rayline-local"
     },
     "subagent": {
       "endpoint": "rayline-cloud",
-      "model": "arc-1",
+      "model": "arc-swift-1.0",
       "router": "rayline-local"
     }
   }
